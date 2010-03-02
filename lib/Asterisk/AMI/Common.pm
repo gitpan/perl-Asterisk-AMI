@@ -6,7 +6,7 @@ Asterisk::AMI::Common - Extends the AMI module to provide simple access to commo
 
 =head1 VERSION
 
-0.1.6
+0.1.7
 
 =head1 SYNOPSIS
 
@@ -364,8 +364,8 @@ Ryan Bullock (rrb3942@gmail.com)
 
 =head1 BUG REPORTING AND FEEBACK
 
-All bugs should be reported to bugs@voipnerd.net.
-Please address any feedback about this module to feedback@voipnerd.net
+Please report any bugs or errors to our github issue tracker at http://github.com/rrb3942/perl-Asterisk-AMI/issues
+or the cpan request tracker at https://rt.cpan.org/Public/Bug/Report.html?Queue=perl-Asterisk-AMI
 
 =head1 COPYRIGHT
 
@@ -381,10 +381,9 @@ package Asterisk::AMI::Common;
 
 use strict;
 use warnings;
-use version;
 use parent qw(Asterisk::AMI);
 
-our $VERSION = qv(0.1.6);
+use version; our $VERSION = qv(0.1.7);
 
 
 my $basicparse = qr/^(.+?)\s*:\s*([^.]+)$/;

@@ -6,7 +6,7 @@ Asterisk::AMI - Perl moduling for interacting with the Asterisk Manager Interfac
 
 =head1 VERSION
 
-0.1.6
+0.1.7
 
 =head1 SYNOPSIS
 
@@ -25,8 +25,10 @@ Asterisk::AMI - Perl moduling for interacting with the Asterisk Manager Interfac
 
 =head1 DESCRIPTION
 
-This module provides an interface to the Asterisk Manager Interface. It's goal is to provide a flexible, powerful, and reliable way to
-interact with Asterisk upon which other applications may be built.
+This module provides an interface to the Asterisk Manager Interface. It's goal is to provide a flexible, powerful, and
+reliable way to interact with Asterisk upon which other applications may be built. It utilizes AnyEvent and therefore
+can integrate very easily into event-based applications, but it still provides blocking functions for us with standard
+scripting.
 
 =head2 Constructor
 
@@ -44,6 +46,7 @@ Creates a new AMI object which takes the arguments as key-value pairs.
 	Timeout		Default timeout of all actions in seconds
 	Handlers	Hash reference of Handlers for events	{ 'EVENT' => \&somesub };
 	Keepalive	Interval (in seconds) to periodically sends 'Ping' actions to asterisk
+	TCP_Keepalive	Enables/Disables SO_KEEPALIVE option on the socket	0|1
 	Blocking	Enable/Disable blocking connects	0|1
 	on_connect	A subroutine to run after we connect
 	on_connect_err	A subroutine to call if we have an error while connecting
@@ -53,8 +56,8 @@ Creates a new AMI object which takes the arguments as key-value pairs.
 
 	'PeerAddr' defaults to 127.0.0.1.\n
 	'PeerPort' defaults to 5038.
-	'Events' may be anything that the AMI will accept as a part of the 'Events' parameter for the login action.
-	Default is 'off.
+	'Events' default is 'off'. May be anything that the AMI will accept as a part of the 'Events' parameter for the 
+	login action.
 	'Username' has no default and must be supplied.
 	'Secret' has no default and must be supplied.
 	'BufferSize' has a default of 30000. It also acts as our max actionid before we reset the counter.
@@ -65,6 +68,9 @@ Creates a new AMI object which takes the arguments as key-value pairs.
 	a default event handler. If handlers are installed we do not buffer events and instead immediatly dispatch them.
 	If no handler is specified for an event type and a 'default' was not set the event is discarded.
 	'Keepalive' only works when running with an event loop.
+	'TCP_Keepalive' default is disabled. Actives the tcp keepalive at the socket layer. This does not require 
+	an eventloop and is lightweight. Useful for applications that use long-lived connections to Asterisk but 
+	do not run an event loop.
 	'Blocking' has a default of 1 (block on connecting). A value of 0 will cause us to queue our connection
 	and login for when an event loop is started. If set to non blocking we will always return a valid object.
 	'on_connect' is a subroutine to call when we have successfully connected and logged into the asterisk manager.
@@ -205,9 +211,9 @@ action() combines send_action() and get_response(), and therefore returns a Resp
 
 In this example once the action 'Ping' finishes we will call somemethod() and pass it the a copy of our AMI object 
 and the Response Object for the action. If TIMEOUT is not specified it will use the default set. A value of 0 means 
-no timeout. When the timeout is reached somemethod() will be called and passed the un-completed Response Object, 
-therefore somemethod() should check the state of the object. Checking the key {'GOOD'} is usually a good indication if 
-the object is useable.
+no timeout. When the timeout is reached somemethod() will be called and passed a reference to the our $astman and
+the un-completed Response Object, therefore somemethod() should check the state of the object. Checking the key {'GOOD'}
+is usually a good indication if the object is useable.
 
 Callback Caveats
 
@@ -291,6 +297,51 @@ This module handles ActionIDs internally and if you supply one in an action it w
 	#Start some event loop
 	someloop;
 
+=head2 How to use in an event-based application
+
+	Getting this module to work with your event based application is really easy so long as you are running an
+	event-loop that is supported by AnyEvent. Below is a simple example of how to use this module with your
+	preferred event loop. We will use EV as our event loop in this example. I use subroutine references in this
+	example, but you could use anonymous subroutines if you want to.
+
+	#Use your prefered loop before our module so that AnyEvent will autodetect it
+	use EV;
+	use Asterisk::AMI:
+
+	#Create your connection
+	my $astman = Asterisk::AMI->new(PeerAddr	=>	'127.0.0.1',
+                        		PeerPort	=>	'5038',
+					Username	=>	'admin',
+					Secret		=>	'supersecret',
+					Events		=>	'on',
+					Handlers	=>	{ default => \&eventhandler }
+				);
+	#Alternativly you can set Blocking => 0, and set an on_error sub to catch conneciton errors
+	die "Unable to connect to asterisk" unless ($astman);
+
+	#Define the subroutines for events
+	sub eventhandler { my ($ami, $event) = @_; print 'Got Event: ',$event->{'Event'},"\r\n"; }
+
+	#Define a subroutine for your action callback
+	sub actioncb { my ($ami, $response) = @_; print 'Got Action Reponse: ',$response->{'Response'},"\r\n"; }
+
+	#Send an action
+	my $action = $astman->({ Action => 'Ping',
+				 CALLBACK => \&actioncb });
+
+	#Do all of you other eventy stuff here, or before all this stuff, whichever
+	#..............
+
+	#Start our loop
+	EV::loop
+
+
+
+	Thats it, the EV loop will allow us to process input from asterisk. Once the action completes it will 
+	call the callback, and any events will be dispatched to eventhandler(). As you can see it is fairly
+	straight-forward. Most of the work will be in creating subroutines to be called for various events and 
+	actions that you plan to use.
+
 =head2 Methods
 
 send_action ( ACTION )
@@ -322,13 +373,6 @@ simple_action ( ACTION [, TIMEOUT ] )
 	Sends the action and returns 1 if the action was considered successful, 0 if it failed, or undef on error
 	and timeout. If no ACTIONID is specified the ACTIONID of the last action sent will be used. If no TIMEOUT is
 	given it blocks, reading in packets until the action completes. This will remove the response from the buffer.
-
-completed ( ACTIONID )
-
-	This does a non-blocking check to see if an action an action has completed and been read into the buffer.
-	If no ACTIONID is given the ACTIONID of the last action sent will be used.
-	It returns 1 if the action has completed and 0 if it has not.
-	This will not remove the response from the buffer.
 
 disconnect ()
 
@@ -374,8 +418,8 @@ Ryan Bullock (rrb3942@gmail.com)
 
 =head1 BUG REPORTING AND FEEBACK
 
-All bugs should be reported to bugs@voipnerd.net.
-Please address any feedback about this module to feedback@voipnerd.net
+Please report any bugs or errors to our github issue tracker at http://github.com/rrb3942/perl-Asterisk-AMI/issues
+or the cpan request tracker at https://rt.cpan.org/Public/Bug/Report.html?Queue=perl-Asterisk-AMI
 
 =head1 COPYRIGHT
 
@@ -387,22 +431,12 @@ modify it under the same terms as Perl itself.
 =cut
 
 #Todo:
-#Better ActionID: autoincrement Done
-#Enable and disable events Done
 #Digest Auth With MD5
-#Timeouts? Done
-#Hashes to build actions? Done
-#Perf Testing? More references? 30000 actions in 11-13 seconds with asterisk on local system
-#Pre-clear actions when sending (delete ACTIONBUFFER{id}) could replace periodic cleanse?
-#Linked to above -> Set max increment id
-#send_action should return undef on err
-#Default timeout? Done
 
 package Asterisk::AMI;
 
 use strict;
 use warnings;
-use version;
 
 use AnyEvent;
 use AnyEvent::Handle;
@@ -410,7 +444,7 @@ use AnyEvent::Socket;
 
 
 #Duh
-our $VERSION = qv(0.1.6);
+use version; our $VERSION = qv(0.1.7);
 
 #Keep track if we are logged in
 my $LOGGEDIN = 0;
@@ -439,7 +473,7 @@ my $vertical;
 {
 	no warnings;
 
-	if ($] > 5.010000) {
+	if ($] >= 5.010000) {
 		$vertical = qr/\v+/;
 	} else {
 		$vertical = qr/[\x0A-\x0D\x85\x{2028}\x{2029}]+/;
@@ -447,7 +481,6 @@ my $vertical;
 }
 
 #Regex for parsing lines
-#my $parse  = qr/^([^:\[]+): (.+)$/;
 my $parse  = qr/^([^:]+): ([^:]+)$/;
 
 my $endcommand = qr/--END COMMAND--$/;
@@ -505,7 +538,7 @@ my $myself;
 my $keepalive;
 
 #Module wide condvar
-#my $process = AnyEvent->condvar;
+#my $process = AE::cv;
 
 #Defaults
 my $PEER = '127.0.0.1';
@@ -517,6 +550,7 @@ my $STOREEVENTS = 1;
 my $CALLBACK = 0;
 my $TIMEOUT = 0;
 my $KEEPALIVE;
+my $TCPALIVE = 0;
 my $BUFFERSIZE = 30000;
 my $BLOCK = 1;
 my %EVENTHANDLERS;
@@ -543,11 +577,13 @@ sub new {
 #Used by anyevent to load our read type
 sub anyevent_read_type {
 
-	my ($handle, $cb) = @_;
+	my ($hdl, $cb) = @_;
 
 	return sub {
-		$_[0]{rbuf} =~ s/^(.+)(?:\015\012\015\012)//so or return 0;
-		$cb->($_[0], $1);
+		if ($_[0]{rbuf} =~ s/^(.+)(?:\015\012\015\012)//so) {
+			$cb->($_[0], $1);
+		}
+
 		return 0;
 	}
 }
@@ -575,6 +611,7 @@ sub _configure {
 	$CALLBACK = $settings{'Callbacks'} if (defined $settings{'Callbacks'});
 	$TIMEOUT = $settings{'Timeout'} if (defined $settings{'Timeout'});
 	$KEEPALIVE = $settings{'Keepalive'} if (defined $settings{'Keepalive'});
+	$TCPALIVE = $settings{'TCP_Keepalive'} if (defined $settings{'TCP_Keepalive'});
 	$BUFFERSIZE = $settings{'BufferSize'} if (defined $settings{'BufferSize'});
 	%EVENTHANDLERS = %{$settings{'Handlers'}} if (defined $settings{'Handlers'});
 	$BLOCK = $settings{'Blocking'} if (defined $settings{'Blocking'});
@@ -590,6 +627,10 @@ sub _configure {
 
 	#We like us
 	$myself = $self;
+
+
+	#Set keepalive
+	$keepalive = AE::timer($KEEPALIVE, $KEEPALIVE, \&_send_keepalive) if ($KEEPALIVE);
 	
 	return 1;
 }
@@ -601,6 +642,9 @@ sub _on_connect_err {
 
 	warn "Failed to connect to asterisk - $PEER:$PORT";
 	warn "Reason: $message";
+
+	#Dispatch all callbacks as if they timed out
+	_clear_cbs();
 
 	if (exists $ON{'err_connect'}) {
 		$ON{'err_connect'}->($self, $message);
@@ -622,6 +666,9 @@ sub _on_error {
 
 	warn "Received Error on socket - $PEER:$PORT";
 	warn "Error Message: $message";
+	
+	#Call all cbs as if they had timed out
+	_clear_cbs();
 
 	$ON{'err'}->($self, $message) if (exists $ON{'err'});
 	
@@ -636,6 +683,9 @@ sub _on_disconnect {
 
 	my $message = "Remote end disconnected - $PEER:$PORT";
 	warn "Remote Asterisk Server ended connection - $PEER:$PORT";
+
+	#Call all callbacks as if they had timed out
+	_clear_cbs();
 
 	if (exists $ON{'disconnect'}) {
 		$ON{'disconnect'}->($self, $message);
@@ -683,11 +733,12 @@ sub _on_connect {
 sub _connect {
 	my ($self) = @_;
 
-	my $process = AnyEvent->condvar;
+	my $process = AE::cv;
 
 	$handle = new AnyEvent::Handle(
 		connect => [$PEER => $PORT],
-		on_connect_err => sub { $process->send(0) if ($BLOCK); $self->_on_connect_err(1,$_[1]); },
+		keepalive => $TCPALIVE,
+		on_connect_err => sub { $self->_on_connect_err(1,$_[1]); },
 		on_error => sub { $self->_on_error($_[1],$_[2]) },
 		on_eof => sub { $self->_on_disconnect; },
 		on_connect => sub { $handle->push_read( line => \&_on_connect ); }
@@ -703,16 +754,9 @@ sub _connect {
         return 1;
 }
 
-#Reads in and parses packet from the AMI
-#Creates a hash
-# Response: Success stores 'Success' in %packet{'Response'}, etc.
-#Returns a hash of the parsed packet
 sub _handle_packet {
 
-	my ($self, $packets) = @_;
-
-	foreach my $packet (split /$DELIM/o, $packets) {
-
+	foreach my $packet (split /$DELIM/o, $_[1]) {
 		my %parsed;
 
 		foreach my $line (split /$EOL/o, $packet) {
@@ -720,13 +764,11 @@ sub _handle_packet {
 			if ($line =~ $parse) {
 				$parsed{$1} = $2;
 			#Is this our command output?
-			} elsif ($line =~ $endcommand) {
+			} elsif ($line =~ s/$endcommand//o) {
 				$parsed{'COMPLETED'} = 1;
 
 				push(@{$parsed{'CMD'}}, grep { s/$trim//o } split(/$vertical/o, $line));
 
-				#Get rid of the '---END COMMAND---'
-				pop @{$parsed{'CMD'}};
 			} elsif ($line) {
 				push(@{$parsed{'DATA'}}, $line);
 			}
@@ -742,7 +784,7 @@ sub _handle_packet {
 #Returns 1 on buffered, 0 on discard
 sub _sort_and_buffer {
 
-	my ($packet) = @_;
+	my $packet = $_[0];
 
 	if (exists $packet->{'ActionID'}) {
 
@@ -760,17 +802,15 @@ sub _sort_and_buffer {
 			} 
 
 			#Copy the response into the buffer
-			#We dont just assign the hash reference to the ActionID becase it is possible, though unlikely
-			#that event data can arrive for an action before the response packet
-			while (my ($key, $value) = each %{$packet}) {
-				if ($key =~ $respcontents) {
-					$ACTIONBUFFER{$actionid}->{$key} =  $value;
-				} elsif ($key eq 'DATA') {
-					push(@{$ACTIONBUFFER{$actionid}->{$key}}, @{$value});
+			foreach (keys %{$packet}) {	
+				if ($_ =~ $respcontents) {
+					$ACTIONBUFFER{$actionid}->{$_} =  $packet->{$_};
+				} elsif ($_ eq 'DATA') {
+					push(@{$ACTIONBUFFER{$actionid}->{$_}}, @{$packet->{$_}});
 				} else {
-					$ACTIONBUFFER{$actionid}->{'PARSED'}->{$key} = $value;
+					$ACTIONBUFFER{$actionid}->{'PARSED'}->{$_} = $packet->{$_};
 				}
-			}
+			 }
 			
 		} elsif (exists $packet->{'Event'}) {
 			my $save = 1;
@@ -788,7 +828,6 @@ sub _sort_and_buffer {
 		if ($ACTIONBUFFER{$actionid}->{'COMPLETED'}) {
 			return 0 unless (exists $ACTIONBUFFER{$actionid}->{'Response'});
 			$ACTIONBUFFER{$actionid}->{'GOOD'} = 1 if ($ACTIONBUFFER{$actionid}->{'Response'} =~ $amipositive);
-
 			if (defined $CALLBACKS{$actionid}->{'cb'}) {
 				#Stuff needed to process callback
 				my $callback = $CALLBACKS{$actionid}->{'cb'};
@@ -833,16 +872,9 @@ sub _sort_and_buffer {
 
 #Generates an  ActionID
 sub _gen_actionid {
-	my $actionid;
-
 	#Reset the seq number if we hit our max
 	$idseq = 1 if ($idseq > $BUFFERSIZE);
-
-	$actionid = $idseq;
-
-	$idseq++;
-
-	return $actionid;
+	return $idseq++;
 }
 
 sub _wait_response {
@@ -850,7 +882,7 @@ sub _wait_response {
 
 	unless ($ACTIONBUFFER{$id}->{'COMPLETED'}) {
 
-		my $process = AnyEvent->condvar;
+		my $process = AE::cv;
 
 		$CALLBACKS{$id}->{'cb'} = sub { $process->send($_[1]) };
 		$timeout = $TIMEOUT unless (defined $timeout);
@@ -864,7 +896,7 @@ sub _wait_response {
 					$process->send($response);
 				};
 
-			$CALLBACKS{$id}->{'timer'} = AnyEvent->timer(after => $timeout, cb => $CALLBACKS{$id}->{'timeout'}); 
+			$CALLBACKS{$id}->{'timer'} = AE::timer $timeout, 0, $CALLBACKS{$id}->{'timeout'};
 		}
 
 		return $process->recv;
@@ -908,7 +940,7 @@ sub send_action {
 					$DISCARD{$id} = 1;
 					$callback->($self, $response);;
 				};
-			$CALLBACKS{$id}->{'timer'} = AnyEvent->timer(after => $actionhash->{'TIMEOUT'}, cb => $CALLBACKS{$id}->{'timeout'}); 
+			$CALLBACKS{$id}->{'timer'} = AE::timer $actionhash->{'TIMEOUT'}, 0, $CALLBACKS{$id}->{'timeout'};
 		}
 	}
 
@@ -1027,13 +1059,20 @@ sub _login {
 	);
 
 	if ($BLOCK) {
-		if ($self->simple_action(\%action)){
+		
+		my $resp = $self->action(\%action);		
+
+		if ($resp->{'GOOD'}){
 			$LOGGEDIN = 1;
 			$ON{'connect'}->($self) if (defined $ON{'connect'});
 			return 1;
 		} else {
 			$LOGGEDIN = 0;
-			warn "Authentication Failed";
+			if ($resp->{'COMPLETED'}) {
+				warn "Authentication Failed";
+			} else {
+				warn "Timed out waiting for login";
+			}
 		}
 	} else {
 		$action{'CALLBACK'} = sub {
@@ -1057,16 +1096,10 @@ sub _login {
 
 		$self->send_action(\%action);
 
-		#Set keep alive;
-		$keepalive = AnyEvent-> timer (	after => $KEEPALIVE,
-						interval => $KEEPALIVE,
-						cb => \&_send_keepalive
-						) if ($KEEPALIVE);
-
 		return 1;
 	}
 
-	return 0;
+	return;
 }
 
 #Logs out of the AMI
@@ -1107,7 +1140,7 @@ sub get_event {
 
 	unless (defined $EVENTBUFFER[0]) {
 
-		my $process = AnyEvent->condvar;
+		my $process = AE::cv;
 
 		$CALLBACKS{'EVENT'}->{'cb'} = sub { $process->send($_[0]) };
 		$CALLBACKS{'EVENT'}->{'timeout'} = sub { warn "Timed out waiting for event"; $process->send(undef); };
@@ -1115,7 +1148,7 @@ sub get_event {
 		$timeout = $TIMEOUT unless (defined $timeout);
 
 		if ($timeout) {
-			$CALLBACKS{'EVENT'}->{'timer'} = AnyEvent->timer(after => $timeout, cb => $CALLBACKS{'EVENT'}->{'timeout'}); 
+			$CALLBACKS{'EVENT'}->{'timer'} = AE::timer $timeout, 0, $CALLBACKS{'EVENT'}->{'timeout'}; 
 		}
 
 		return $process->recv;
@@ -1150,16 +1183,26 @@ sub error {
 #Sends a keep alive
 sub _send_keepalive {
 
-	#my ($self) = @_;
-
-	my $timeout = 5 unless ($TIMEOUT);
-
 	my %action = (	Action => 'Ping',
-			CALLBACK => sub { $myself->_on_timeout("Asterisk failed to respond to keepalive - $PEER:$PORT") unless ($_[1]->{'GOOD'}); },
-			TIMEOUT => $timeout
+			CALLBACK => sub { $myself->_on_timeout("Asterisk failed to respond to keepalive - $PEER:$PORT") unless ($_[1]->{'GOOD'}); }
 		);
+
+	$action{'TIMEOUT'} = 5 unless ($TIMEOUT);
 	
 	$myself->send_action(\%action);
+}
+
+#Calls all callbacks as if they had timed out
+#Used when an error has occured on the socket
+sub _clear_cbs {
+	foreach my $id (keys %CALLBACKS) {
+		my $response = $ACTIONBUFFER{$id};
+		my $callback = $CALLBACKS{$id}->{'cb'};
+		delete $ACTIONBUFFER{$id};
+		delete $CALLBACKS{$id};
+		$DISCARD{$id} = 1;
+		$callback->($myself, $response);
+	}
 }
 
 #Cleans up 

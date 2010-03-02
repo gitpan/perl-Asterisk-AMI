@@ -1,5 +1,11 @@
-Asterisk::AMI version 0.1.6
+Asterisk::AMI version 0.1.7
 ================
+
+DESCRIPTION
+
+This module provides an interface to the Asterisk Manager Interface. It's goal is to provide a flexible, powerful, and
+reliable way to interact with Asterisk upon which other applications may be built. It utilizes AnyEvent and therefore can
+integrate very easily into event-based applications, but it still provides blocking functions for us with standard scripting.
 
 INSTALLATION
 
@@ -14,7 +20,7 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-	AnyEvent
+	AnyEvent version 5.0 or higher
 	AnyEvent::Handle
 	AnyEvent::Socket
 	version

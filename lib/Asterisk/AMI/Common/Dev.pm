@@ -6,7 +6,7 @@ Asterisk::AMI::Common::Dev - Extends AMI::Common to include functions for the cu
 
 =head1 VERSION
 
-0.1.6
+0.1.7
 
 =head1 SYNOPSIS
 
@@ -114,8 +114,8 @@ Ryan Bullock (rrb3942@gmail.com)
 
 =head1 BUG REPORTING AND FEEBACK
 
-All bugs should be reported to bugs@voipnerd.net.
-Please address any feedback about this module to feedback@voipnerd.net
+Please report any bugs or errors to our github issue tracker at http://github.com/rrb3942/perl-Asterisk-AMI/issues
+or the cpan request tracker at https://rt.cpan.org/Public/Bug/Report.html?Queue=perl-Asterisk-AMI
 
 =head1 COPYRIGHT
 
@@ -132,7 +132,7 @@ use strict;
 use warnings;
 use parent qw(Asterisk::AMI::Common);
 
-our $VERSION = qv(0.1.6);
+use version; our $VERSION = qv(0.1.7);
 
 sub new {
 	my ($class, %options) = @_;
